@@ -61,7 +61,7 @@ struct ActivityView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                .padding(.bottom, 48)
                 .animation(.snappy, value: filter)
             }
             .background(Color.appBackground)

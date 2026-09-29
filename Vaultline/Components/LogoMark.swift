@@ -4,25 +4,12 @@ struct LogoMark: View {
     var size: CGFloat = 36
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-            .fill(AppConfig.accent)
-            .overlay {
-                VShape()
-                    .stroke(.white, style: StrokeStyle(lineWidth: size * 0.1, lineCap: .round, lineJoin: .round))
-                    .padding(size * 0.26)
-            }
+        Text(AppConfig.logoEmoji)
+            .font(.system(size: size * 0.62))
             .frame(width: size, height: size)
+            .background(AppConfig.accent.opacity(0.15),
+                        in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
             .accessibilityHidden(true)
-    }
-}
-
-private struct VShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        return path
     }
 }
 

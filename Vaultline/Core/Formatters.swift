@@ -13,14 +13,8 @@ enum Format {
         return value.formatted(.currency(code: "USD").precision(.fractionLength(digits)))
     }
 
-    /// $1.23T / $4.56B / $7.89M / $12.30K (works on iOS 17).
     static func compactUSD(_ value: Double) -> String {
-        let magnitude = Swift.abs(value)
-        let units: [(size: Double, suffix: String)] = [(1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")]
-        for unit in units where magnitude >= unit.size {
-            return "$" + (value / unit.size).formatted(.number.precision(.fractionLength(2))) + unit.suffix
-        }
-        return usd(value)
+        value.formatted(.currency(code: "USD").notation(.compactName))
     }
 
     static func signedUSD(_ value: Double) -> String {

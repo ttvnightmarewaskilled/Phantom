@@ -17,7 +17,8 @@ struct HomeView: View {
                     PeriodChart(
                         coinID: nil,
                         simulated: { wallet.portfolioSeries($0) },
-                        format: { wallet.settings.hideBalances ? "••••" : Format.usd($0) }
+                        format: { wallet.settings.hideBalances ? "••••" : Format.usd($0) },
+                        showSourceLabel: false
                     )
 
                     HStack(spacing: 10) {
@@ -28,13 +29,13 @@ struct HomeView: View {
 
                     assetsSection
 
-                    Text("Simulated wallet · no real funds")
-                        .font(.footnote)
+                    Text("Simulated history · no real funds")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                .padding(.bottom, 48)
             }
             .background(Color.appBackground)
             .safeAreaInset(edge: .top, spacing: 0) { header }

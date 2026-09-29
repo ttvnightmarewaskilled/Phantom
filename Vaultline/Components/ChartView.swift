@@ -153,6 +153,7 @@ struct PeriodChart: View {
     let coinID: String?
     let simulated: (ChartPeriod) -> [ChartPoint]
     let format: (Double) -> String
+    var showSourceLabel = true
 
     @State private var period: ChartPeriod = .day
     @State private var remote: [ChartPoint]?
@@ -187,9 +188,11 @@ struct PeriodChart: View {
                 }
             }
 
-            Text(remote == nil ? "Simulated history" : "Live data · CoinGecko")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if showSourceLabel {
+                Text(remote == nil ? "Simulated history" : "Live data · CoinGecko")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .task(id: "\(period.rawValue)|\(coinID ?? "")") { await load() }
     }

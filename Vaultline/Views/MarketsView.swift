@@ -35,16 +35,14 @@ struct MarketsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     chips
                     status
-                    if filter == .meme {
-                        Label("Meme coins are extremely volatile and many go to zero. This app only simulates trades.",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
                     list
+                    Text("Demo trades only")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                .padding(.bottom, 48)
                 .animation(.snappy, value: filter)
             }
             .background(Color.appBackground)
