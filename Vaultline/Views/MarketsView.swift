@@ -117,7 +117,7 @@ struct MarketsView: View {
                 ContentUnavailableView.search
             }
         } else {
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 ForEach(Array(coins.enumerated()), id: \.element.id) { index, coin in
                     NavigationLink(value: coin) {
                         MarketRow(coin: coin, watched: prices.isWatched(coin.id))

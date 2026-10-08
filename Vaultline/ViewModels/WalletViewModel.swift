@@ -146,16 +146,35 @@ final class WalletViewModel {
         let payAmount = usdAmount / max(usdc.price, 0.0001)
         guard usdc.quantity >= payAmount else { throw WalletError.insufficientBalance }
 
-        let ticker = coin.ticker
-        if asset(ticker: ticker) == nil {
-            try addAsset(name: coin.name, ticker: ticker, quantity: 0, price: coin.price,
-                         change24h: coin.change24h, colorHex: coin.colorHex,
-                         coinID: coin.id, imageURL: coin.image)
-        }
-        guard let target = asset(ticker: ticker),
-              let quote = quote(fromID: usdc.id, toID: target.id, payAmount: payAmount)
+        let targetID = try ensureAsset(for: coin)
+        guard let quote = quote(fromID: usdc.id, toID: targetID, payAmount: payAmount)
         else { throw WalletError.assetNotFound }
         return try executeSwap(quote)
+    }
+
+    /// Finds the wallet asset for a market coin, or adds it with a zero balance.
+    /// Many coins share a ticker, so a clash gets a number added (PEPE, PEPE2, ...).
+    @discardableResult
+    func ensureAsset(for coin: MarketCoin) throws -> Asset.ID {
+        if let existing = state.assets.first(where: { $0.coinID == coin.id }) { return existing.id }
+        guard coin.price > 0 else { throw WalletError.invalidAmount }
+        var ticker = coin.ticker
+        var suffix = 2
+        while asset(ticker: ticker) != nil {
+            ticker = "\(coin.ticker)\(suffix)"
+            suffix += 1
+        }
+        try addAsset(name: coin.name, ticker: ticker, quantity: 0, price: coin.price,
+                     change24h: coin.change24h, colorHex: coin.colorHex,
+                     coinID: coin.id, imageURL: coin.image)
+        guard let created = asset(ticker: ticker) else { throw WalletError.assetNotFound }
+        return created.id
+    }
+
+    /// Removes an asset that was only added for browsing and never received anything.
+    func discardEmptyAsset(id: Asset.ID) {
+        guard let asset = asset(id: id), asset.quantity == 0 else { return }
+        mutate { $0.assets.removeAll { $0.id == id } }
     }
 
     // MARK: - Send / Receive

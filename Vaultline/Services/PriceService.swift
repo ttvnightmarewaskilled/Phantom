@@ -107,7 +107,7 @@ final class PriceService {
         do {
             // Sequential on purpose: gentle on the free rate limit.
             let top = try await fetchMarkets(category: nil, ids: nil)
-            let meme = try await fetchMarkets(category: "meme-token", ids: nil)
+            let meme = try await fetchAllMemes()
             var held: [MarketCoin] = []
             if !heldIDs.isEmpty { held = try await fetchMarkets(category: nil, ids: heldIDs) }
 
@@ -124,13 +124,36 @@ final class PriceService {
         }
     }
 
-    private func fetchMarkets(category: String?, ids: [String]?) async throws -> [MarketCoin] {
+    private static let memePageSize = 250   // CoinGecko's maximum per page
+    private static let memeMaxPages = 8     // up to 2,000 meme coins
+
+    /// Every coin in CoinGecko's meme category, fetched page by page.
+    /// If a later page fails (e.g. rate limit), the coins loaded so far are kept.
+    private func fetchAllMemes() async throws -> [MarketCoin] {
+        var all = try await fetchMarkets(category: "meme-token", ids: nil, page: 1,
+                                         perPage: Self.memePageSize, sparkline: true)
+        var lastCount = all.count
+        var page = 2
+        while lastCount == Self.memePageSize, page <= Self.memeMaxPages {
+            guard let next = try? await fetchMarkets(category: "meme-token", ids: nil, page: page,
+                                                     perPage: Self.memePageSize, sparkline: false)
+            else { break }
+            all += next
+            lastCount = next.count
+            page += 1
+        }
+        var seen = Set<String>()
+        return all.filter { seen.insert($0.id).inserted }
+    }
+
+    private func fetchMarkets(category: String?, ids: [String]?, page: Int = 1,
+                              perPage: Int? = nil, sparkline: Bool? = nil) async throws -> [MarketCoin] {
         var items = [
             URLQueryItem(name: "vs_currency", value: "usd"),
             URLQueryItem(name: "order", value: "market_cap_desc"),
-            URLQueryItem(name: "per_page", value: ids == nil ? "100" : "50"),
-            URLQueryItem(name: "page", value: "1"),
-            URLQueryItem(name: "sparkline", value: ids == nil ? "true" : "false"),
+            URLQueryItem(name: "per_page", value: String(perPage ?? (ids == nil ? 100 : 50))),
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "sparkline", value: (sparkline ?? (ids == nil)) ? "true" : "false"),
             URLQueryItem(name: "price_change_percentage", value: "24h")
         ]
         if let category { items.append(URLQueryItem(name: "category", value: category)) }

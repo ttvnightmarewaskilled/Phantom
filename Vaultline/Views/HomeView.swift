@@ -83,23 +83,26 @@ struct HomeView: View {
         .background(.bar)
     }
 
+    /// Only assets you actually hold; anything at a zero balance is hidden here.
+    private var heldAssets: [Asset] { wallet.assets.filter { $0.quantity > 0 } }
+
     private var assetsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Assets").font(.title3.weight(.semibold))
-            if wallet.assets.isEmpty {
+            if heldAssets.isEmpty {
                 ContentUnavailableView("No assets", systemImage: "tray",
                                        description: Text("Add assets from Settings → Demo controls, or buy one in Markets."))
                     .cardStyle()
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(wallet.assets.enumerated()), id: \.element.id) { index, asset in
+                    ForEach(Array(heldAssets.enumerated()), id: \.element.id) { index, asset in
                         NavigationLink(value: asset.id) {
                             AssetRow(asset: asset, hidden: wallet.settings.hideBalances)
                         }
                         .buttonStyle(PressableStyle())
                         .simultaneousGesture(TapGesture().onEnded { Haptics.selection() })
                         .accessibilityIdentifier("asset_row_\(asset.ticker)")
-                        if index < wallet.assets.count - 1 { Divider().padding(.leading, 68) }
+                        if index < heldAssets.count - 1 { Divider().padding(.leading, 68) }
                     }
                 }
                 .cardStyle()

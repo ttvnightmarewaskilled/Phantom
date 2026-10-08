@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SwapView: View {
     @Environment(WalletViewModel.self) private var wallet
+    @Environment(PriceService.self) private var prices
     @Environment(\.dismiss) private var dismiss
 
     var presetFrom: Asset.ID? = nil
@@ -12,6 +13,9 @@ struct SwapView: View {
     @State private var toID: Asset.ID?
     @State private var payText = ""
     @State private var showReview = false
+    @State private var reviewQuote: SwapQuote?   // frozen copy, so the sheet survives clearing the amount
+    @State private var showPicker = false
+    @State private var browsedIDs: Set<Asset.ID> = []   // empty assets added just by picking a coin
     @FocusState private var focused: Bool
 
     private var fromAsset: Asset? { fromID.flatMap { wallet.asset(id: $0) } }
@@ -41,6 +45,7 @@ struct SwapView: View {
                     Button("Review swap") {
                         focused = false
                         Haptics.impact(.medium)
+                        reviewQuote = quote
                         showReview = true
                     }
                     .buttonStyle(PrimaryButtonStyle())
@@ -60,10 +65,15 @@ struct SwapView: View {
                 }
             }
             .sheet(isPresented: $showReview) {
-                if let quote { ReviewSwapSheet(quote: quote) { payText = "" } }
+                if let reviewQuote { ReviewSwapSheet(quote: reviewQuote) { payText = "" } }
+            }
+            .sheet(isPresented: $showPicker) {
+                TokenPickerSheet(held: wallet.assets, coins: prices.allCoins,
+                                 onPickAsset: pickReceiveAsset, onPickCoin: pickReceiveCoin)
             }
         }
         .onAppear(perform: setDefaults)
+        .onDisappear { dropUnusedBrowsed(all: true) }
     }
 
     // MARK: Cards
@@ -129,10 +139,27 @@ struct SwapView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("You receive (estimated)").font(.subheadline).foregroundStyle(.secondary)
             HStack {
-                AssetMenu(selectedID: toID, assets: wallet.assets) { id in
-                    if id == fromID { fromID = toID }
-                    toID = id
+                Button {
+                    Haptics.selection()
+                    focused = false
+                    showPicker = true
+                } label: {
+                    HStack(spacing: 8) {
+                        if let toAsset {
+                            TokenIcon(ticker: toAsset.ticker, colorHex: toAsset.colorHex,
+                                      imageURL: toAsset.imageURL, size: 28)
+                            Text(toAsset.ticker).font(.headline)
+                        } else {
+                            Text("Select").font(.headline)
+                        }
+                        Image(systemName: "chevron.down").font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color(.tertiarySystemFill)))
                 }
+                .accessibilityLabel("Choose asset to receive")
                 Spacer()
                 Text(quote.map { Format.quantity($0.receiveAmount) } ?? "0")
                     .font(.system(.title, design: .rounded, weight: .semibold))
@@ -163,6 +190,39 @@ struct SwapView: View {
         }
         .cardStyle()
         .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func pickReceiveAsset(_ asset: Asset) {
+        setReceive(asset.id)
+        dropUnusedBrowsed()
+    }
+
+    private func pickReceiveCoin(_ coin: MarketCoin) {
+        let alreadyHeld = wallet.assets.contains { $0.coinID == coin.id }
+        guard let id = try? wallet.ensureAsset(for: coin) else { return }
+        if !alreadyHeld { browsedIDs.insert(id) }
+        setReceive(id)
+        dropUnusedBrowsed()
+    }
+
+    private func setReceive(_ id: Asset.ID) {
+        if id == fromID { fromID = toID }
+        toID = id
+    }
+
+    /// Removes coins that were only picked to look at and never swapped into.
+    private func dropUnusedBrowsed(all: Bool = false) {
+        for id in browsedIDs {
+            if (wallet.asset(id: id)?.quantity ?? 0) > 0 {
+                browsedIDs.remove(id)
+                continue
+            }
+            if !all && (id == toID || id == fromID) { continue }
+            wallet.discardEmptyAsset(id: id)
+            browsedIDs.remove(id)
+            if toID == id { toID = nil }
+            if fromID == id { fromID = nil }
+        }
     }
 
     private func setDefaults() {
@@ -247,20 +307,7 @@ private struct ReviewSwapSheet: View {
     }
 
     private var success: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(.green)
-                .symbolEffect(.bounce, value: phase == .done)
-                .padding(.top, 24)
-            Text("Swap complete").font(.title2.weight(.bold))
-            Text("\(Format.quantity(quote.payAmount)) \(quote.fromTicker) → \(Format.quantity(quote.receiveAmount)) \(quote.toTicker)")
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 24)
-            Button("Done") { dismiss() }
-                .buttonStyle(PrimaryButtonStyle())
-        }
-        .transition(.scale.combined(with: .opacity))
+        SwapSuccessView(quote: quote) { dismiss() }
     }
 
     private func confirm() {
@@ -277,5 +324,181 @@ private struct ReviewSwapSheet: View {
                 phase = .failed(error.localizedDescription)
             }
         }
+    }
+}
+
+// MARK: - Token picker (your assets + every market coin)
+
+private struct TokenPickerSheet: View {
+    let held: [Asset]
+    let coins: [MarketCoin]
+    var onPickAsset: (Asset) -> Void
+    var onPickCoin: (MarketCoin) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var query: String { search.trimmingCharacters(in: .whitespaces) }
+
+    private func matches(_ name: String, _ ticker: String) -> Bool {
+        query.isEmpty || name.localizedCaseInsensitiveContains(query) || ticker.localizedCaseInsensitiveContains(query)
+    }
+
+    private var heldMatches: [Asset] { held.filter { matches($0.name, $0.ticker) } }
+
+    private var otherCoins: [MarketCoin] {
+        let heldIDs = Set(held.compactMap(\.coinID))
+        return coins.filter { $0.price > 0 && !heldIDs.contains($0.id) && matches($0.name, $0.ticker) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if !heldMatches.isEmpty {
+                    Section("Your assets") {
+                        ForEach(heldMatches) { asset in
+                            Button {
+                                Haptics.selection()
+                                onPickAsset(asset)
+                                dismiss()
+                            } label: {
+                                row(name: asset.name, ticker: asset.ticker, colorHex: asset.colorHex, image: asset.imageURL)
+                            }
+                        }
+                    }
+                }
+                Section("All coins (\(otherCoins.count))") {
+                    ForEach(otherCoins) { coin in
+                        Button {
+                            Haptics.selection()
+                            onPickCoin(coin)
+                            dismiss()
+                        } label: {
+                            row(name: coin.name, ticker: coin.ticker, colorHex: coin.colorHex, image: coin.image)
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Choose coin")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $search, prompt: "Search coins")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func row(name: String, ticker: String, colorHex: String, image: String?) -> some View {
+        HStack(spacing: 12) {
+            TokenIcon(ticker: ticker, colorHex: colorHex, imageURL: image, size: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                Text(ticker).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Success animation
+
+private struct CheckShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY + rect.height * 0.54))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.42, y: rect.minY + rect.height * 0.76))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.80, y: rect.minY + rect.height * 0.28))
+        return path
+    }
+}
+
+private struct SwapSuccessView: View {
+    let quote: SwapQuote
+    var onDone: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var ring: CGFloat = 0
+    @State private var check: CGFloat = 0
+    @State private var pop = false
+    @State private var burstStarted = false
+    @State private var burstOut = false
+    @State private var showText = false
+
+    private let burstCount = 8
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 8)
+
+            ZStack {
+                ForEach(0..<burstCount, id: \.self) { index in
+                    let angle = Double(index) / Double(burstCount) * 2 * Double.pi
+                    Text(index.isMultiple(of: 2) ? "💸" : "✨")
+                        .font(.title2)
+                        .offset(x: burstOut ? CGFloat(cos(angle)) * 100 : 0,
+                                y: burstOut ? CGFloat(sin(angle)) * 100 : 0)
+                        .scaleEffect(burstOut ? 1.1 : 0.3)
+                        .opacity(burstStarted ? (burstOut ? 0 : 1) : 0)
+                }
+
+                Circle()
+                    .fill(Color.green.opacity(0.15))
+                    .frame(width: 112, height: 112)
+                    .scaleEffect(pop ? 1 : 0.6)
+                    .opacity(pop ? 1 : 0)
+
+                Circle()
+                    .trim(from: 0, to: ring)
+                    .stroke(Color.green, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 112, height: 112)
+
+                CheckShape()
+                    .trim(from: 0, to: check)
+                    .stroke(Color.green, style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                    .frame(width: 56, height: 56)
+            }
+            .frame(width: 220, height: 220)
+            .accessibilityHidden(true)
+
+            VStack(spacing: 8) {
+                Text("Swap complete")
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                Text("\(Format.quantity(quote.payAmount)) \(quote.fromTicker)  →  \(Format.quantity(quote.receiveAmount)) \(quote.toTicker)")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(AppConfig.accent.opacity(0.15), in: Capsule())
+                    .foregroundStyle(AppConfig.accent)
+            }
+            .opacity(showText ? 1 : 0)
+            .offset(y: showText ? 0 : 14)
+            .accessibilityElement(children: .combine)
+
+            Spacer(minLength: 16)
+
+            Button("Done", action: onDone)
+                .buttonStyle(PrimaryButtonStyle())
+        }
+        .task { await play() }
+    }
+
+    private func play() async {
+        if reduceMotion {
+            ring = 1; check = 1; pop = true; showText = true
+            return
+        }
+        withAnimation(.easeOut(duration: 0.5)) { ring = 1 }
+        try? await Task.sleep(for: .milliseconds(380))
+        withAnimation(.spring(duration: 0.45, bounce: 0.5)) { pop = true }
+        withAnimation(.easeOut(duration: 0.35)) { check = 1 }
+        try? await Task.sleep(for: .milliseconds(300))
+        burstStarted = true
+        try? await Task.sleep(for: .milliseconds(60))
+        withAnimation(.easeOut(duration: 1.0)) { burstOut = true }
+        withAnimation(.easeOut(duration: 0.45).delay(0.1)) { showText = true }
     }
 }
