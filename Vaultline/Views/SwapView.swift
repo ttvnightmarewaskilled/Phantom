@@ -12,8 +12,7 @@ struct SwapView: View {
     @State private var fromID: Asset.ID?
     @State private var toID: Asset.ID?
     @State private var payText = ""
-    @State private var showReview = false
-    @State private var reviewQuote: SwapQuote?   // frozen copy, so the sheet survives clearing the amount
+    @State private var review: ReviewItem?   // frozen copy of the quote, so the sheet never goes blank
     @State private var showPicker = false
     @State private var browsedIDs: Set<Asset.ID> = []   // empty assets added just by picking a coin
     @FocusState private var focused: Bool
@@ -45,8 +44,7 @@ struct SwapView: View {
                     Button("Review swap") {
                         focused = false
                         Haptics.impact(.medium)
-                        reviewQuote = quote
-                        showReview = true
+                        if let quote { review = ReviewItem(quote: quote) }
                     }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(quote == nil || validation != nil)
@@ -64,8 +62,8 @@ struct SwapView: View {
                     if isSheet { Button("Close") { dismiss() } }
                 }
             }
-            .sheet(isPresented: $showReview) {
-                if let reviewQuote { ReviewSwapSheet(quote: reviewQuote) { payText = "" } }
+            .sheet(item: $review) { item in
+                ReviewSwapSheet(quote: item.quote) { payText = "" }
             }
             .sheet(isPresented: $showPicker) {
                 TokenPickerSheet(held: wallet.assets, coins: prices.allCoins,
@@ -73,7 +71,10 @@ struct SwapView: View {
             }
         }
         .onAppear(perform: setDefaults)
-        .onDisappear { dropUnusedBrowsed(all: true) }
+        .onDisappear {
+            // Ignore the sheets opening on top of this screen; only clean up when really leaving.
+            if review == nil && !showPicker { dropUnusedBrowsed(all: true) }
+        }
     }
 
     // MARK: Cards
@@ -237,6 +238,11 @@ struct SwapView: View {
 }
 
 // MARK: - Review / confirmation
+
+private struct ReviewItem: Identifiable {
+    let id = UUID()
+    let quote: SwapQuote
+}
 
 private struct ReviewSwapSheet: View {
     let quote: SwapQuote
